@@ -24,8 +24,26 @@ const client = new MongoClient(uri, {
 
 async function run() {
   try {
+
+    const usersCollection = client.db("real_estate_DB").collection("users");
+
     // Connect the client to the server	(optional starting in v4.7)
     await client.connect();
+
+    // * USERS COllections Related API
+
+    app.post("/users", async (req, res) => {
+      const user = req.body;
+      const existing = await usersCollection.findOne({ email: user.email });
+      if (existing) {
+        return res.send({ message: "User already exists" });
+      }
+      const result = await usersCollection.insertOne(user);
+      res.send(result);
+    });
+
+
+    
     // Send a ping to confirm a successful connection
     await client.db("admin").command({ ping: 1 });
     console.log(
