@@ -99,6 +99,7 @@ async function run() {
             image: updateData.image,
             minPrice: updateData.minPrice,
             maxPrice: updateData.maxPrice,
+            description: updateData.propertyDetails,
           },
         };
 
@@ -160,9 +161,30 @@ async function run() {
       res.send(property);
     });
 
-    // POST all wishlist Data
+    // GET: Check if property is already in wishlist
+    app.get("/wishlists/check", async (req, res) => {
+      const { userEmail, propertyId } = req.query;
+
+      const exists = await wishlistCollection.findOne({
+        userEmail,
+        propertyId,
+      });
+      res.send({ alreadyWishlisted: !!exists });
+    });
+
+    // POST: Add to Wishlist (Prevent Duplicate)
     app.post("/wishlists", async (req, res) => {
       const wishlistData = req.body;
+
+      const exists = await wishlistCollection.findOne({
+        userEmail: wishlistData.userEmail,
+        propertyId: wishlistData.propertyId,
+      });
+
+      if (exists) {
+        return res.send({ acknowledged: false, message: "Already wishlisted" });
+      }
+
       const result = await wishlistCollection.insertOne(wishlistData);
       res.send(result);
     });
