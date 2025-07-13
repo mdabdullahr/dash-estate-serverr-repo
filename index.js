@@ -1,7 +1,7 @@
 require("dotenv").config();
 const express = require("express");
 const cors = require("cors");
-const { MongoClient, ServerApiVersion } = require("mongodb");
+const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
 
 const app = express();
 const port = process.env.PORT || 5000;
@@ -24,7 +24,9 @@ const client = new MongoClient(uri, {
 async function run() {
   try {
     const usersCollection = client.db("real_estate_DB").collection("users");
-    const agentPropertiesCollection = client.db("real_estate_DB").collection("properties");
+    const propertiesCollection = client
+      .db("real_estate_DB")
+      .collection("properties");
 
     // Connect the client to the server	(optional starting in v4.7)
     await client.connect();
@@ -67,7 +69,49 @@ async function run() {
     // Add Property API
     app.post("/properties", async (req, res) => {
       const property = req.body;
-      const result = await agentPropertiesCollection.insertOne(property);
+      const result = await propertiesCollection.insertOne(property);
+      res.send(result);
+    });
+
+    // GET agent's own added properties
+    app.get("/properties/agent/:email", async (req, res) => {
+      const email = req.params.email;
+      const result = await propertiesCollection
+        .find({ agentEmail: email })
+        .toArray();
+      res.send(result);
+    });
+
+    // DELETE a property by ID
+    app.delete("/properties/:id", async (req, res) => {
+      const id = req.params.id;
+      const query = { _id: new ObjectId(id) };
+      const result = await propertiesCollection.deleteOne(query);
+      res.send(result);
+    });
+
+    //* ADMIN RELATED API
+    // GET all properties for admin
+    app.get("/admin/properties", async (req, res) => {
+      const result = await propertiesCollection.find().toArray();
+      res.send(result);
+    });
+
+    // PATCH verify
+    app.patch("/admin/properties/verify/:id", async (req, res) => {
+      const id = req.params.id;
+      const filter = { _id: new ObjectId(id) };
+      const update = { $set: { verificationStatus: "verified" } };
+      const result = await propertiesCollection.updateOne(filter, update);
+      res.send(result);
+    });
+
+    // PATCH reject
+    app.patch("/admin/properties/reject/:id", async (req, res) => {
+      const id = req.params.id;
+      const filter = { _id: new ObjectId(id) };
+      const update = { $set: { verificationStatus: "rejected" } };
+      const result = await propertiesCollection.updateOne(filter, update);
       res.send(result);
     });
 
