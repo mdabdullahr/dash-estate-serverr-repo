@@ -82,6 +82,31 @@ async function run() {
       res.send(result);
     });
 
+    // PATCH: Update property by ID
+    app.patch("/properties/:id", async (req, res) => {
+      const { id } = req.params;
+      const updateData = req.body;
+
+      try {
+        const filter = { _id: new ObjectId(id) };
+        const updateDoc = {
+          $set: {
+            title: updateData.title,
+            location: updateData.location,
+            image: updateData.image,
+            minPrice: updateData.minPrice,
+            maxPrice: updateData.maxPrice,
+          },
+        };
+
+        const result = await propertiesCollection.updateOne(filter, updateDoc);
+        res.send(result);
+      } catch (error) {
+        console.error("Update failed:", error.message);
+        res.status(500).send({ error: "Failed to update property" });
+      }
+    });
+
     // DELETE a property by ID
     app.delete("/properties/:id", async (req, res) => {
       const id = req.params.id;
