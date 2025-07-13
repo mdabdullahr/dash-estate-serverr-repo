@@ -27,7 +27,10 @@ async function run() {
     const propertiesCollection = client
       .db("real_estate_DB")
       .collection("properties");
-
+    const wishlistCollection = client
+      .db("real_estate_DB")
+      .collection("wishlists");
+    const reviewsCollection = client.db("real_estate_DB").collection("reviews");
     // Connect the client to the server	(optional starting in v4.7)
     await client.connect();
 
@@ -137,6 +140,45 @@ async function run() {
       const filter = { _id: new ObjectId(id) };
       const update = { $set: { verificationStatus: "rejected" } };
       const result = await propertiesCollection.updateOne(filter, update);
+      res.send(result);
+    });
+
+    //* ALL PROPERTIES RELATED API
+    // GET all verified properties
+    app.get("/properties/verified", async (req, res) => {
+      const verifiedProperties = await propertiesCollection
+        .find({ verificationStatus: "verified" })
+        .toArray();
+      res.send(verifiedProperties);
+    });
+
+    // GET specific property by id
+    app.get("/properties/:id", async (req, res) => {
+      const id = req.params.id;
+      const query = { _id: new ObjectId(id) };
+      const property = await propertiesCollection.findOne(query);
+      res.send(property);
+    });
+
+    // POST all wishlist Data
+    app.post("/wishlists", async (req, res) => {
+      const wishlistData = req.body;
+      const result = await wishlistCollection.insertOne(wishlistData);
+      res.send(result);
+    });
+
+    // GET review by id
+    app.get("/reviews/:propertyId", async (req, res) => {
+      const propertyId = req.params.propertyId;
+      const query = { propertyId };
+      const reviews = await reviewsCollection.find(query).toArray();
+      res.send(reviews);
+    });
+
+    // POST all reviews
+    app.post("/reviews", async (req, res) => {
+      const review = req.body;
+      const result = await reviewsCollection.insertOne(review);
       res.send(result);
     });
 
