@@ -2,6 +2,7 @@ require("dotenv").config();
 const express = require("express");
 const cors = require("cors");
 const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
+const stripe = require("stripe")(process.env.STRIPE_SECRET_KEY);
 
 const app = express();
 const port = process.env.PORT || 5000;
@@ -86,6 +87,51 @@ async function run() {
       res.send(result);
     });
 
+    // Get all offers for properties added by this agent
+    app.get("/agent-requests", async (req, res) => {
+      const { email } = req.query;
+      if (!email) return res.status(400).send("Email is required");
+
+      // First, get agent's properties
+      const properties = await propertiesCollection
+        .find({ agentEmail: email })
+        .toArray();
+      const propertyIds = properties.map((p) => p._id.toString());
+
+      // Then, get offers for those properties
+      const offers = await offersCollection
+        .find({ propertyId: { $in: propertyIds } })
+        .sort({createdAt : -1})
+        .toArray();
+
+      res.send(offers);
+    });
+
+    // Accept one offer, reject others for same property
+    app.patch("/offers/accept/:id", async (req, res) => {
+      const id = req.params.id;
+      const offer = await offersCollection.findOne({ _id: new ObjectId(id) });
+
+      if (!offer) return res.status(404).send("Offer not found");
+
+      // 1. Accept selected offer
+      await offersCollection.updateOne(
+        { _id: new ObjectId(id) },
+        { $set: { status: "accepted" } }
+      );
+
+      // 2. Reject others for same property
+      await offersCollection.updateMany(
+        {
+          propertyId: offer.propertyId,
+          _id: { $ne: new ObjectId(id) },
+        },
+        { $set: { status: "rejected" } }
+      );
+
+      res.send({ message: "Offer accepted and others rejected." });
+    });
+
     // PATCH: Update property by ID
     app.patch("/properties/:id", async (req, res) => {
       const { id } = req.params;
@@ -110,6 +156,18 @@ async function run() {
         console.error("Update failed:", error.message);
         res.status(500).send({ error: "Failed to update property" });
       }
+    });
+
+    // Reject a specific offer
+    app.patch("/offers/reject/:id", async (req, res) => {
+      const id = req.params.id;
+
+      const result = await offersCollection.updateOne(
+        { _id: new ObjectId(id) },
+        { $set: { status: "rejected" } }
+      );
+
+      res.send(result);
     });
 
     // DELETE a property by ID
@@ -237,6 +295,27 @@ async function run() {
       res.send(result);
     });
 
+    // Get offered property by user email
+    app.get("/offers", async (req, res) => {
+      const { email } = req.query;
+      if (!email) return res.status(400).send("Email is required");
+
+      const result = await offersCollection
+        .find({ buyerEmail: email })
+        .toArray();
+      res.send(result);
+    });
+
+    // Called the api from payment page by single data
+    app.get("/offers/:id", async (req, res) => {
+      const id = req.params.id;
+      const result = await offersCollection.findOne({ _id: new ObjectId(id) });
+      if (!result) {
+        return res.status(404).send({ message: "Offer not found" });
+      }
+      res.send(result);
+    });
+
     // Submit an offer with validation by user
     app.post("/offers", async (req, res) => {
       const offerData = req.body;
@@ -244,6 +323,7 @@ async function run() {
         propertyId,
         propertyTitle,
         propertyLocation,
+        propertyImage,
         agentName,
         buyerEmail,
         buyerName,
@@ -278,6 +358,7 @@ async function run() {
         propertyId,
         propertyTitle,
         propertyLocation,
+        propertyImage,
         agentName,
         buyerEmail,
         buyerName,
@@ -295,6 +376,49 @@ async function run() {
       }
 
       res.send(result);
+    });
+
+    // Update offer after payment
+    app.patch("/offers/payment/:id", async (req, res) => {
+      const { id } = req.params;
+      const { transactionId, status, paidAt } = req.body;
+
+      const result = await offersCollection.updateOne(
+        { _id: new ObjectId(id) },
+        {
+          $set: {
+            status,
+            transactionId,
+            paidAt,
+          },
+        }
+      );
+
+      res.send(result);
+    });
+
+    // * Create Payment Intent Api
+    // Inside your Express app
+    app.post("/create-payment-intent", async (req, res) => {
+      const { amount } = req.body;
+      // console.log("amount from payment intent",amount);
+      // ✅ Basic validation
+      if (!amount || typeof amount !== "number" || amount <= 0) {
+        return res.status(400).send({ error: "Invalid price" });
+      }
+
+      try {
+        const paymentIntent = await stripe.paymentIntents.create({
+          amount: amount * 100, // Stripe expects amount in cents
+          currency: "usd",
+          payment_method_types: ["card"],
+        });
+// console.log(paymentIntent.client_secret);
+        res.send({ clientSecret: paymentIntent.client_secret });
+      } catch (error) {
+        console.error("Stripe error:", error);
+        res.status(500).send({ error: error.message });
+      }
     });
 
     // Send a ping to confirm a successful connection
