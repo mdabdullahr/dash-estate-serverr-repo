@@ -31,6 +31,7 @@ async function run() {
       .db("real_estate_DB")
       .collection("wishlists");
     const reviewsCollection = client.db("real_estate_DB").collection("reviews");
+    const offersCollection = client.db("real_estate_DB").collection("offers");
     // Connect the client to the server	(optional starting in v4.7)
     await client.connect();
 
@@ -201,6 +202,98 @@ async function run() {
     app.post("/reviews", async (req, res) => {
       const review = req.body;
       const result = await reviewsCollection.insertOne(review);
+      res.send(result);
+    });
+
+    // Get All User Specific wishlist by query email
+    app.get("/wishlists", async (req, res) => {
+      const userEmail = req.query.email;
+      if (!userEmail) return res.status(400).send("Missing email");
+
+      const wishlists = await wishlistCollection.find({ userEmail }).toArray();
+      res.send(wishlists);
+    });
+
+    // Get specific wishlist for offer by user
+    app.get("/wishlists/:id", async (req, res) => {
+      const id = req.params.id;
+      const wishlist = await wishlistCollection.findOne({
+        _id: new ObjectId(id),
+      });
+
+      if (!wishlist) {
+        return res.status(404).send({ message: "Wishlist not found" });
+      }
+
+      res.send(wishlist);
+    });
+
+    // Delete A wishlist items by user
+    app.delete("/wishlists/:id", async (req, res) => {
+      const id = req.params.id;
+      const result = await wishlistCollection.deleteOne({
+        _id: new ObjectId(id),
+      });
+      res.send(result);
+    });
+
+    // Submit an offer with validation by user
+    app.post("/offers", async (req, res) => {
+      const offerData = req.body;
+      const {
+        propertyId,
+        propertyTitle,
+        propertyLocation,
+        agentName,
+        buyerEmail,
+        buyerName,
+        offerAmount,
+        buyingDate,
+        minPrice,
+        maxPrice,
+        wishlistId,
+      } = offerData;
+
+      // Validate required fields
+      if (!propertyId || !buyerEmail || !offerAmount || !buyingDate) {
+        return res.status(400).send({ message: "Missing required fields" });
+      }
+
+      // Optional: Validate user role
+      const buyer = await usersCollection.findOne({ email: buyerEmail });
+      if (!buyer || buyer.role !== "user") {
+        return res
+          .status(403)
+          .send({ message: "Only users can submit offers" });
+      }
+
+      // Validate price range
+      if (offerAmount < minPrice || offerAmount > maxPrice) {
+        return res
+          .status(400)
+          .send({ message: "Offer must be within price range" });
+      }
+
+      const newOffer = {
+        propertyId,
+        propertyTitle,
+        propertyLocation,
+        agentName,
+        buyerEmail,
+        buyerName,
+        offerAmount,
+        buyingDate,
+        status: "pending",
+        createdAt: new Date(),
+      };
+
+      const result = await offersCollection.insertOne(newOffer);
+
+      // Optional: Remove wishlist item after offer
+      if (wishlistId) {
+        await wishlistCollection.deleteOne({ _id: new ObjectId(wishlistId) });
+      }
+
       res.send(result);
     });
 
