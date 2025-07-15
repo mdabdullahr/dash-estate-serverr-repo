@@ -356,12 +356,31 @@ async function run() {
     });
 
     //* ALL PROPERTIES RELATED API
-    // GET all verified properties
+    // GET all verified properties with sort, search functionality
     app.get("/properties/verified", async (req, res) => {
-      const verifiedProperties = await propertiesCollection
-        .find({ verificationStatus: "verified" })
-        .toArray();
-      res.send(verifiedProperties);
+      const { search = "", sort = "" } = req.query;
+
+      const query = {
+        verificationStatus: "verified",
+        location: { $regex: search, $options: "i" },
+      };
+
+      const allProperties = await propertiesCollection.find(query).toArray();
+
+      // Calculate averagePrice and sort
+      const propertiesWithAvg = allProperties.map((p) => ({
+        ...p,
+        averagePrice: (p.minPrice + p.maxPrice) / 2,
+      }));
+
+      const sorted =
+        sort === "asc"
+          ? propertiesWithAvg.sort((a, b) => a.averagePrice - b.averagePrice)
+          : sort === "desc"
+          ? propertiesWithAvg.sort((a, b) => b.averagePrice - a.averagePrice)
+          : propertiesWithAvg;
+
+      res.send(sorted);
     });
 
     // GET specific property by id
