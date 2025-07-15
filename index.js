@@ -101,7 +101,7 @@ async function run() {
       const email = req.params.email;
       const result = await propertiesCollection
         .find({ agentEmail: email })
-        .sort({timestamp : -1})
+        .sort({ timestamp: -1 })
         .toArray();
       res.send(result);
     });
@@ -222,6 +222,81 @@ async function run() {
       const result = await propertiesCollection.find().toArray();
       res.send(result);
     });
+
+    // Get All Users
+    app.get("/users", async (req, res) => {
+      const users = await usersCollection.find().sort({createdAt : -1}).toArray();
+      res.send(users);
+    });
+
+    // Make admin api
+    app.patch("/users/admin/:id", async (req, res) => {
+      const id = req.params.id;
+      const result = await usersCollection.updateOne(
+        { _id: new ObjectId(id) },
+        { $set: { role: "admin" } }
+      );
+      res.send(result);
+    });
+
+    // Make agent api
+    app.patch("/users/agent/:id", async (req, res) => {
+      const id = req.params.id;
+      const result = await usersCollection.updateOne(
+        { _id: new ObjectId(id) },
+        { $set: { role: "agent" } }
+      );
+      res.send(result);
+    });
+
+    // Mark as fraud api
+    app.patch("/users/fraud/:id", async (req, res) => {
+      const id = req.params.id;
+      const user = await usersCollection.findOne({ _id: new ObjectId(id) });
+
+      if (!user || user.role !== "agent") {
+        return res.status(400).send("Only agents can be marked as fraud");
+      }
+
+      // 1. Update user status to fraud
+      await usersCollection.updateOne(
+        { _id: new ObjectId(id) },
+        { $set: { status: "fraud" } }
+      );
+
+      // 2. Remove or unverify agent's properties
+      await propertiesCollection.updateMany(
+        { agentEmail: user.email },
+        { $set: { verificationStatus: "rejected" } } // Or delete them if required
+      );
+
+      res.send({ message: "User marked as fraud and properties hidden" });
+    });
+
+    // Delete user from database and also firebase
+    // admin.initializeApp({ credential: admin.credential.cert(serviceAccount) })
+
+    app.delete("/users/:id", async (req, res) => {
+      const id = req.params.id;
+      const user = await usersCollection.findOne({ _id: new ObjectId(id) });
+
+      if (!user) return res.status(404).send("User not found");
+
+      // 1. Delete from MongoDB
+      const result = await usersCollection.deleteOne({ _id: new ObjectId(id) });
+      res.send(result)
+
+      // 2. Delete from Firebase Auth
+      // try {
+      //   const userRecord = await admin.auth().getUserByEmail(user.email);
+      //   await admin.auth().deleteUser(userRecord.uid);
+      //   res.send({ message: "User deleted from DB and Firebase" });
+      // } catch (error) {
+      //   res.send({
+      //     message: "User deleted from DB, but not found in Firebase",
+      //   });
+      // }
+    }); 
 
     // PATCH verify
     app.patch("/admin/properties/verify/:id", async (req, res) => {
