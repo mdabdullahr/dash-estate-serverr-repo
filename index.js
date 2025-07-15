@@ -225,8 +225,27 @@ async function run() {
 
     // Get All Users
     app.get("/users", async (req, res) => {
-      const users = await usersCollection.find().sort({createdAt : -1}).toArray();
+      const users = await usersCollection
+        .find()
+        .sort({ createdAt: -1 })
+        .toArray();
       res.send(users);
+    });
+
+    // Get all reviews Admin(ManageReviews) page
+    // GET /reviews
+    app.get("/reviews", async (req, res) => {
+      try {
+        const reviews = await reviewsCollection
+          .find()
+          .sort({ postedAt: -1 })
+          .toArray();
+
+        res.send(reviews);
+      } catch (error) {
+        console.error("Error fetching reviews:", error);
+        res.status(500).send({ error: "Failed to fetch reviews" });
+      }
     });
 
     // Make admin api
@@ -284,7 +303,7 @@ async function run() {
 
       // 1. Delete from MongoDB
       const result = await usersCollection.deleteOne({ _id: new ObjectId(id) });
-      res.send(result)
+      res.send(result);
 
       // 2. Delete from Firebase Auth
       // try {
@@ -296,7 +315,7 @@ async function run() {
       //     message: "User deleted from DB, but not found in Firebase",
       //   });
       // }
-    }); 
+    });
 
     // PATCH verify
     app.patch("/admin/properties/verify/:id", async (req, res) => {
@@ -314,6 +333,26 @@ async function run() {
       const update = { $set: { verificationStatus: "rejected" } };
       const result = await propertiesCollection.updateOne(filter, update);
       res.send(result);
+    });
+
+    // DELETE /reviews/:id admin ManageReviews page
+    app.delete("/reviews/:id", async (req, res) => {
+      const id = req.params.id;
+
+      try {
+        const result = await reviewsCollection.deleteOne({
+          _id: new ObjectId(id),
+        });
+
+        if (result.deletedCount > 0) {
+          res.send({ message: "Review deleted successfully", deletedCount: 1 });
+        } else {
+          res.status(404).send({ error: "Review not found" });
+        }
+      } catch (error) {
+        console.error("Error deleting review:", error);
+        res.status(500).send({ error: "Failed to delete review" });
+      }
     });
 
     //* ALL PROPERTIES RELATED API
