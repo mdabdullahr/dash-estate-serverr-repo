@@ -38,23 +38,6 @@ async function run() {
 
     // * USERS COllections Related API
 
-    // app.get("/offers/:id/bought-status", async (req, res) => {
-    //   try{
-    //     const id = req.params.id;
-    //     console.log( "id from this status",id);
-    //     if(!id){
-    //       return res.status(404).send({message: "id is required"});
-    //     }
-    //     const offer = await offersCollection.findOne({propertyId : id})
-    //     if(!offer){
-    //       return res.status(404).send({message: "offer not found"})
-    //     }
-    //     res.send({boughtStatus : offer.status});
-    //   }catch (error){
-    //     res.status(500).send({message: "internal server error"})
-    //   }
-    // });
-
     // Role based api
     app.get("/users/:email/role", async (req, res) => {
       try {
@@ -74,6 +57,24 @@ async function run() {
       } catch (error) {
         console.error("Error fetching user:", error);
         res.status(500).send({ message: "Internal server error" });
+      }
+    });
+
+    // Get specific property status for button disabled
+    app.get("/offers/:id/bought-status", async (req, res) => {
+      try {
+        const id = req.params.id;
+        console.log("id from this status", id);
+        if (!id) {
+          return res.status(404).send({ message: "id is required" });
+        }
+        const offer = await offersCollection.findOne({ propertyId: id });
+        if (!offer) {
+          return res.status(404).send({ message: "offer not found" });
+        }
+        res.send({ boughtStatus: offer.status });
+      } catch (error) {
+        res.status(500).send({ message: "internal server error" });
       }
     });
 
@@ -100,6 +101,7 @@ async function run() {
       const email = req.params.email;
       const result = await propertiesCollection
         .find({ agentEmail: email })
+        .sort({timestamp : -1})
         .toArray();
       res.send(result);
     });
@@ -134,7 +136,7 @@ async function run() {
       try {
         const sold = await offersCollection
           .find({ agentEmail: email, status: "bought" })
-          .sort({paidAt : -1})
+          .sort({ paidAt: -1 })
           .toArray();
 
         res.send(sold);
@@ -393,7 +395,13 @@ async function run() {
       } = offerData;
 
       // Validate required fields
-      if (!propertyId || !buyerEmail || !offerAmount || !buyingDate || !agentEmail) {
+      if (
+        !propertyId ||
+        !buyerEmail ||
+        !offerAmount ||
+        !buyingDate ||
+        !agentEmail
+      ) {
         return res.status(400).send({ message: "Missing required fields" });
       }
 
