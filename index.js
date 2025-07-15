@@ -38,6 +38,23 @@ async function run() {
 
     // * USERS COllections Related API
 
+    // app.get("/offers/:id/bought-status", async (req, res) => {
+    //   try{
+    //     const id = req.params.id;
+    //     console.log( "id from this status",id);
+    //     if(!id){
+    //       return res.status(404).send({message: "id is required"});
+    //     }
+    //     const offer = await offersCollection.findOne({propertyId : id})
+    //     if(!offer){
+    //       return res.status(404).send({message: "offer not found"})
+    //     }
+    //     res.send({boughtStatus : offer.status});
+    //   }catch (error){
+    //     res.status(500).send({message: "internal server error"})
+    //   }
+    // });
+
     // Role based api
     app.get("/users/:email/role", async (req, res) => {
       try {
@@ -101,10 +118,29 @@ async function run() {
       // Then, get offers for those properties
       const offers = await offersCollection
         .find({ propertyId: { $in: propertyIds } })
-        .sort({createdAt : -1})
+        .sort({ createdAt: -1 })
         .toArray();
 
       res.send(offers);
+    });
+
+    // Agent Sold Property get api
+    app.get("/sold-properties", async (req, res) => {
+      const email = req.query.email;
+      if (!email) {
+        return res.status(400).send({ error: "Agent email required" });
+      }
+
+      try {
+        const sold = await offersCollection
+          .find({ agentEmail: email, status: "bought" })
+          .sort({paidAt : -1})
+          .toArray();
+
+        res.send(sold);
+      } catch (error) {
+        res.status(500).send({ error: "Failed to fetch sold properties" });
+      }
     });
 
     // Accept one offer, reject others for same property
@@ -256,10 +292,31 @@ async function run() {
       res.send(reviews);
     });
 
+    // GET review by specific user created
+    app.get("/reviews", async (req, res) => {
+      const email = req.query.email;
+      if (!email) return res.status(400).send({ error: "Email is required" });
+
+      const result = await reviewsCollection
+        .find({ userEmail: email })
+        .sort({ postedAt: -1 })
+        .toArray();
+      res.send(result);
+    });
+
     // POST all reviews
     app.post("/reviews", async (req, res) => {
       const review = req.body;
       const result = await reviewsCollection.insertOne(review);
+      res.send(result);
+    });
+
+    // Delete reviews by specific user created
+    app.delete("/reviews/:id", async (req, res) => {
+      const id = req.params.id;
+      const result = await reviewsCollection.deleteOne({
+        _id: new ObjectId(id),
+      });
       res.send(result);
     });
 
@@ -325,6 +382,7 @@ async function run() {
         propertyLocation,
         propertyImage,
         agentName,
+        agentEmail,
         buyerEmail,
         buyerName,
         offerAmount,
@@ -335,7 +393,7 @@ async function run() {
       } = offerData;
 
       // Validate required fields
-      if (!propertyId || !buyerEmail || !offerAmount || !buyingDate) {
+      if (!propertyId || !buyerEmail || !offerAmount || !buyingDate || !agentEmail) {
         return res.status(400).send({ message: "Missing required fields" });
       }
 
@@ -360,6 +418,7 @@ async function run() {
         propertyLocation,
         propertyImage,
         agentName,
+        agentEmail,
         buyerEmail,
         buyerName,
         offerAmount,
@@ -413,7 +472,7 @@ async function run() {
           currency: "usd",
           payment_method_types: ["card"],
         });
-// console.log(paymentIntent.client_secret);
+        // console.log(paymentIntent.client_secret);
         res.send({ clientSecret: paymentIntent.client_secret });
       } catch (error) {
         console.error("Stripe error:", error);
