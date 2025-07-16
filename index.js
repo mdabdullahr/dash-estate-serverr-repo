@@ -34,55 +34,30 @@ const verifyJWT = (req, res, next) => {
   jwt.verify(token, process.env.JWT_SECRET, (err, decoded) => {
     if (err) return res.status(403).send("Forbidden");
     req.decoded = decoded;
-    console.log(decoded);
+    // console.log(decoded);
     next();
   });
 };
 
 // Verify Token Email
 const verifyTokenEmail = (req, res, next) => {
-  const clientEmail =
-    req.query.email ||
-    req.body.email ||
-    req.body.organizerEmail ||
-    req.params.email;
-  if (clientEmail !== req.decoded.email) {
-    return res.status(403).send({ message: "forbidden access" });
-  }
-  next();
-};
+  const decodedEmail = req.decoded?.email;
 
-// Verify Admin
-const verifyAdmin = async (req, res, next) => {
-  const email = req.decoded.email;
-  const query = { email };
-  const user = await usersCollection.findOne(query);
-  if (!user || user.role !== "admin") {
-    return res.status(403).send({ message: "forbidden access" });
-  }
-  next();
-};
+  // Extract email from possible locations
+  const paramEmail = req.params?.email;
+  const queryEmail = req.query?.email;
+  const bodyEmail = req.body?.email;
 
-// Verify Agent
-const verifyAgent = async (req, res, next) => {
-  const email = req.decoded.email;
-  const query = { email };
-  const user = await usersCollection.findOne(query);
-  if (!user || user.role !== "agent") {
-    return res.status(403).send({ message: "forbidden access" });
+  // Allow if any of them match the decoded email
+  if (
+    decodedEmail === paramEmail ||
+    decodedEmail === queryEmail ||
+    decodedEmail === bodyEmail
+  ) {
+    return next();
   }
-  next();
-};
 
-// Verify User
-const verifyUser = async (req, res, next) => {
-  const email = req.decoded.email;
-  const query = { email };
-  const user = await usersCollection.findOne(query);
-  if (!user || user.role !== "user") {
-    return res.status(403).send({ message: "forbidden access" });
-  }
-  next();
+  return res.status(403).send({ message: "Forbidden access: Email mismatch" });
 };
 
 async function run() {
@@ -99,6 +74,40 @@ async function run() {
     // Connect the client to the server	(optional starting in v4.7)
     await client.connect();
 
+    //* Role Validation verifications
+    // Verify Admin
+    const verifyAdmin = async (req, res, next) => {
+      const email = req.decoded.email;
+      const query = { email };
+      const user = await usersCollection.findOne(query);
+      if (!user || user.role !== "admin") {
+        return res.status(403).send({ message: "forbidden access" });
+      }
+      next();
+    };
+
+    // Verify Agent
+    const verifyAgent = async (req, res, next) => {
+      const email = req.decoded.email;
+      const query = { email };
+      const user = await usersCollection.findOne(query);
+      if (!user || user.role !== "agent") {
+        return res.status(403).send({ message: "forbidden access" });
+      }
+      next();
+    };
+
+    // Verify User
+    const verifyUser = async (req, res, next) => {
+      const email = req.decoded.email;
+      const query = { email };
+      const user = await usersCollection.findOne(query);
+      if (!user || user.role !== "user") {
+        return res.status(403).send({ message: "forbidden access" });
+      }
+      next();
+    };
+
     // *JWT APIs
     app.post("/jwt", (req, res) => {
       const user = req.body;
@@ -112,7 +121,7 @@ async function run() {
     app.get(
       "/users/:email/role",
       verifyJWT,
-      verifyTokenEmail,
+
       async (req, res) => {
         try {
           const email = req.params.email;
@@ -175,10 +184,13 @@ async function run() {
     app.get(
       "/properties/agent/:email",
       verifyJWT,
-      verifyTokenEmail,
       verifyAgent,
+      verifyTokenEmail,
       async (req, res) => {
         const email = req.params.email;
+        // if (req.decoded.email === email) {
+        //   return res.status(403).send({ message: "Unauthorized access" });
+        // }
         const result = await propertiesCollection
           .find({ agentEmail: email })
           .sort({ timestamp: -1 })
@@ -191,8 +203,8 @@ async function run() {
     app.get(
       "/agent-requests",
       verifyJWT,
-      verifyTokenEmail,
       verifyAgent,
+      verifyTokenEmail,
       async (req, res) => {
         const { email } = req.query;
         if (!email) return res.status(400).send("Email is required");
@@ -217,8 +229,8 @@ async function run() {
     app.get(
       "/sold-properties",
       verifyJWT,
-      verifyTokenEmail,
       verifyAgent,
+      verifyTokenEmail,
       async (req, res) => {
         const email = req.query.email;
         if (!email) {
@@ -238,30 +250,67 @@ async function run() {
       }
     );
 
-    // Accept one offer, reject others for same property
-    app.patch("/offers/accept/:id", verifyJWT, verifyAgent, async (req, res) => {
-      const id = req.params.id;
-      const offer = await offersCollection.findOne({ _id: new ObjectId(id) });
+    // GET total sold amount for an agent
+    app.get("/sold/total-amount", verifyJWT, verifyAgent, verifyTokenEmail, async (req, res) => {
+      const { email } = req.query;
+      if (!email) return res.status(400).send({ error: "Email is required" });
 
-      if (!offer) return res.status(404).send("Offer not found");
+      try {
+        const sold = await offersCollection
+          .aggregate([
+            {
+              $match: {
+                agentEmail: email,
+                status: "bought",
+              },
+            },
+            {
+              $group: {
+                _id: null,
+                total: { $sum: "$offerAmount" },
+              },
+            },
+          ])
+          .toArray();
 
-      // 1. Accept selected offer
-      await offersCollection.updateOne(
-        { _id: new ObjectId(id) },
-        { $set: { status: "accepted" } }
-      );
-
-      // 2. Reject others for same property
-      await offersCollection.updateMany(
-        {
-          propertyId: offer.propertyId,
-          _id: { $ne: new ObjectId(id) },
-        },
-        { $set: { status: "rejected" } }
-      );
-
-      res.send({ message: "Offer accepted and others rejected." });
+        const totalAmount = sold[0]?.total || 0;
+        res.send({ totalAmount });
+      } catch (err) {
+        res
+          .status(500)
+          .send({ error: "Failed to calculate total sold amount" });
+      }
     });
+
+    // Accept one offer, reject others for same property
+    app.patch(
+      "/offers/accept/:id",
+      verifyJWT,
+      verifyAgent,
+      async (req, res) => {
+        const id = req.params.id;
+        const offer = await offersCollection.findOne({ _id: new ObjectId(id) });
+
+        if (!offer) return res.status(404).send("Offer not found");
+
+        // 1. Accept selected offer
+        await offersCollection.updateOne(
+          { _id: new ObjectId(id) },
+          { $set: { status: "accepted" } }
+        );
+
+        // 2. Reject others for same property
+        await offersCollection.updateMany(
+          {
+            propertyId: offer.propertyId,
+            _id: { $ne: new ObjectId(id) },
+          },
+          { $set: { status: "rejected" } }
+        );
+
+        res.send({ message: "Offer accepted and others rejected." });
+      }
+    );
 
     // PATCH: Update property by ID
     app.patch("/properties/:id", verifyJWT, verifyAgent, async (req, res) => {
@@ -290,16 +339,21 @@ async function run() {
     });
 
     // Reject a specific offer
-    app.patch("/offers/reject/:id", verifyJWT, verifyAgent, async (req, res) => {
-      const id = req.params.id;
+    app.patch(
+      "/offers/reject/:id",
+      verifyJWT,
+      verifyAgent,
+      async (req, res) => {
+        const id = req.params.id;
 
-      const result = await offersCollection.updateOne(
-        { _id: new ObjectId(id) },
-        { $set: { status: "rejected" } }
-      );
+        const result = await offersCollection.updateOne(
+          { _id: new ObjectId(id) },
+          { $set: { status: "rejected" } }
+        );
 
-      res.send(result);
-    });
+        res.send(result);
+      }
+    );
 
     // DELETE a property by ID
     app.delete("/properties/:id", verifyJWT, verifyAgent, async (req, res) => {
@@ -327,7 +381,7 @@ async function run() {
 
     // Get all reviews Admin(ManageReviews) page
     // GET /reviews
-    app.get("/reviews", verifyJWT, verifyAdmin, async (req, res) => {
+    app.get("/allReviews", verifyJWT, verifyAdmin, async (req, res) => {
       try {
         const reviews = await reviewsCollection
           .find()
@@ -411,22 +465,32 @@ async function run() {
     });
 
     // PATCH verify
-    app.patch("/admin/properties/verify/:id", verifyJWT, verifyAdmin, async (req, res) => {
-      const id = req.params.id;
-      const filter = { _id: new ObjectId(id) };
-      const update = { $set: { verificationStatus: "verified" } };
-      const result = await propertiesCollection.updateOne(filter, update);
-      res.send(result);
-    });
+    app.patch(
+      "/admin/properties/verify/:id",
+      verifyJWT,
+      verifyAdmin,
+      async (req, res) => {
+        const id = req.params.id;
+        const filter = { _id: new ObjectId(id) };
+        const update = { $set: { verificationStatus: "verified" } };
+        const result = await propertiesCollection.updateOne(filter, update);
+        res.send(result);
+      }
+    );
 
     // PATCH reject
-    app.patch("/admin/properties/reject/:id", verifyJWT, verifyAdmin, async (req, res) => {
-      const id = req.params.id;
-      const filter = { _id: new ObjectId(id) };
-      const update = { $set: { verificationStatus: "rejected" } };
-      const result = await propertiesCollection.updateOne(filter, update);
-      res.send(result);
-    });
+    app.patch(
+      "/admin/properties/reject/:id",
+      verifyJWT,
+      verifyAdmin,
+      async (req, res) => {
+        const id = req.params.id;
+        const filter = { _id: new ObjectId(id) };
+        const update = { $set: { verificationStatus: "rejected" } };
+        const result = await propertiesCollection.updateOne(filter, update);
+        res.send(result);
+      }
+    );
 
     // DELETE /reviews/:id admin ManageReviews page
     app.delete("/reviews/:id", verifyJWT, verifyAdmin, async (req, res) => {
@@ -521,16 +585,22 @@ async function run() {
     });
 
     // GET review by specific user created
-    app.get("/reviews", verifyJWT, verifyTokenEmail, verifyUser, async (req, res) => {
-      const email = req.query.email;
-      if (!email) return res.status(400).send({ error: "Email is required" });
+    app.get(
+      "/reviews",
+      verifyJWT,
+      verifyUser,
+      verifyTokenEmail,
+      async (req, res) => {
+        const email = req.query.email;
+        if (!email) return res.status(400).send({ error: "Email is required" });
 
-      const result = await reviewsCollection
-        .find({ userEmail: email })
-        .sort({ postedAt: -1 })
-        .toArray();
-      res.send(result);
-    });
+        const result = await reviewsCollection
+          .find({ userEmail: email })
+          .sort({ postedAt: -1 })
+          .toArray();
+        res.send(result);
+      }
+    );
 
     // POST all reviews
     app.post("/reviews", verifyJWT, async (req, res) => {
@@ -549,13 +619,21 @@ async function run() {
     });
 
     // Get All User Specific wishlist by query email
-    app.get("/wishlists", verifyJWT, verifyTokenEmail, verifyUser, async (req, res) => {
-      const userEmail = req.query.email;
-      if (!userEmail) return res.status(400).send("Missing email");
+    app.get(
+      "/wishlists",
+      verifyJWT,
+      verifyTokenEmail,
+      verifyUser,
+      async (req, res) => {
+        const userEmail = req.query.email;
+        if (!userEmail) return res.status(400).send("Missing email");
 
-      const wishlists = await wishlistCollection.find({ userEmail }).toArray();
-      res.send(wishlists);
-    });
+        const wishlists = await wishlistCollection
+          .find({ userEmail })
+          .toArray();
+        res.send(wishlists);
+      }
+    );
 
     // Get specific wishlist for offer by user
     app.get("/wishlists/:id", verifyJWT, verifyUser, async (req, res) => {
@@ -581,15 +659,21 @@ async function run() {
     });
 
     // Get offered property by user email
-    app.get("/offers", verifyJWT, verifyTokenEmail, verifyUser, async (req, res) => {
-      const { email } = req.query;
-      if (!email) return res.status(400).send("Email is required");
+    app.get(
+      "/offers",
+      verifyJWT,
+      verifyTokenEmail,
+      verifyUser,
+      async (req, res) => {
+        const { email } = req.query;
+        if (!email) return res.status(400).send("Email is required");
 
-      const result = await offersCollection
-        .find({ buyerEmail: email })
-        .toArray();
-      res.send(result);
-    });
+        const result = await offersCollection
+          .find({ buyerEmail: email })
+          .toArray();
+        res.send(result);
+      }
+    );
 
     // Called the api from payment page by single data
     app.get("/offers/:id", verifyJWT, verifyUser, async (req, res) => {
@@ -672,23 +756,28 @@ async function run() {
     });
 
     // Update offer after payment
-    app.patch("/offers/payment/:id", verifyJWT, verifyUser, async (req, res) => {
-      const { id } = req.params;
-      const { transactionId, status, paidAt } = req.body;
+    app.patch(
+      "/offers/payment/:id",
+      verifyJWT,
+      verifyUser,
+      async (req, res) => {
+        const { id } = req.params;
+        const { transactionId, status, paidAt } = req.body;
 
-      const result = await offersCollection.updateOne(
-        { _id: new ObjectId(id) },
-        {
-          $set: {
-            status,
-            transactionId,
-            paidAt,
-          },
-        }
-      );
+        const result = await offersCollection.updateOne(
+          { _id: new ObjectId(id) },
+          {
+            $set: {
+              status,
+              transactionId,
+              paidAt,
+            },
+          }
+        );
 
-      res.send(result);
-    });
+        res.send(result);
+      }
+    );
 
     // * Create Payment Intent Api
     // Inside your Express app
