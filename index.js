@@ -115,6 +115,14 @@ async function run() {
       res.send({ token });
     });
 
+    // Home Page advertise fetch
+    app.get("/properties/advertised", async (req, res) => {
+      const properties = await propertiesCollection
+        .find({ advertised: true })
+        .toArray();
+      res.send(properties);
+    });
+
     // * USERS COllections Related API
 
     // Role based api
@@ -251,36 +259,42 @@ async function run() {
     );
 
     // GET total sold amount for an agent
-    app.get("/sold/total-amount", verifyJWT, verifyAgent, verifyTokenEmail, async (req, res) => {
-      const { email } = req.query;
-      if (!email) return res.status(400).send({ error: "Email is required" });
+    app.get(
+      "/sold/total-amount",
+      verifyJWT,
+      verifyAgent,
+      verifyTokenEmail,
+      async (req, res) => {
+        const { email } = req.query;
+        if (!email) return res.status(400).send({ error: "Email is required" });
 
-      try {
-        const sold = await offersCollection
-          .aggregate([
-            {
-              $match: {
-                agentEmail: email,
-                status: "bought",
+        try {
+          const sold = await offersCollection
+            .aggregate([
+              {
+                $match: {
+                  agentEmail: email,
+                  status: "bought",
+                },
               },
-            },
-            {
-              $group: {
-                _id: null,
-                total: { $sum: "$offerAmount" },
+              {
+                $group: {
+                  _id: null,
+                  total: { $sum: "$offerAmount" },
+                },
               },
-            },
-          ])
-          .toArray();
+            ])
+            .toArray();
 
-        const totalAmount = sold[0]?.total || 0;
-        res.send({ totalAmount });
-      } catch (err) {
-        res
-          .status(500)
-          .send({ error: "Failed to calculate total sold amount" });
+          const totalAmount = sold[0]?.total || 0;
+          res.send({ totalAmount });
+        } catch (err) {
+          res
+            .status(500)
+            .send({ error: "Failed to calculate total sold amount" });
+        }
       }
-    });
+    );
 
     // Accept one offer, reject others for same property
     app.patch(
@@ -394,6 +408,34 @@ async function run() {
         res.status(500).send({ error: "Failed to fetch reviews" });
       }
     });
+
+    // Get all verified (non-advertised) properties for admin:
+    app.get(
+      "/properties/verified/admin",
+      verifyJWT,
+      verifyAdmin,
+      async (req, res) => {
+        const properties = await propertiesCollection
+          .find({ verificationStatus: "verified" })
+          .toArray();
+        res.send(properties);
+      }
+    );
+
+    // Make property Advertised
+    app.patch(
+      "/properties/advertise/:id",
+      verifyJWT,
+      verifyAdmin,
+      async (req, res) => {
+        const id = req.params.id;
+        const result = await propertiesCollection.updateOne(
+          { _id: new ObjectId(id) },
+          { $set: { advertised: true } }
+        );
+        res.send(result);
+      }
+    );
 
     // Make admin api
     app.patch("/users/admin/:id", verifyJWT, verifyAdmin, async (req, res) => {
