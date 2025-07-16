@@ -123,6 +123,22 @@ async function run() {
       res.send(properties);
     });
 
+    // Home Page latest review
+    // GET: /reviews/latest
+    app.get("/reviews/latest", async (req, res) => {
+      try {
+        const latestReviews = await reviewsCollection
+          .find()
+          .sort({ postedAt: -1 })
+          .limit(3)
+          .toArray();
+
+        res.send(latestReviews);
+      } catch (error) {
+        res.status(500).send({ error: "Failed to fetch latest reviews" });
+      }
+    });
+
     // * USERS COllections Related API
 
     // Role based api
@@ -652,7 +668,7 @@ async function run() {
     });
 
     // Delete reviews by specific user created
-    app.delete("/reviews/:id", verifyJWT, verifyUser, async (req, res) => {
+    app.delete("/user-reviews/:id", verifyJWT, verifyUser, async (req, res) => {
       const id = req.params.id;
       const result = await reviewsCollection.deleteOne({
         _id: new ObjectId(id),
