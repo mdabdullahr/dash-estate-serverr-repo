@@ -862,74 +862,172 @@ async function run() {
     });
 
     //* GET: /api/dashboard-summary?email=...
-    app.get("/api/dashboard-summary", verifyJWT, verifyTokenEmail, async (req, res) => {
-      const email = req.query.email;
-      if (!email) return res.status(400).json({ message: "Email is required" });
+    app.get(
+      "/api/dashboard-summary",
+      verifyJWT,
+      verifyTokenEmail,
+      async (req, res) => {
+        const email = req.query.email;
+        if (!email)
+          return res.status(400).json({ message: "Email is required" });
 
-      try {
-        const user = await usersCollection.findOne({ email });
+        try {
+          const user = await usersCollection.findOne({ email });
 
-        if (!user) return res.status(404).json({ message: "User not found" });
+          if (!user) return res.status(404).json({ message: "User not found" });
 
-        const role = user.role;
+          const role = user.role;
+          const result = { role };
 
-        const result = { role };
+          // 🧑 User Role Dashboard Summary
+          if (role === "user") {
+            const wishlistCount = await wishlistCollection.countDocuments({
+              userEmail: email,
+            });
+            const boughtCount = await offersCollection.countDocuments({
+              buyerEmail: email,
+              status: "bought",
+            });
+            const reviewCount = await reviewsCollection.countDocuments({
+              userEmail: email,
+            });
 
-        if (role === "user") {
-          const wishlistCount = await wishlistCollection.countDocuments({
-            userEmail: email,
-          });
-          const boughtCount = await offersCollection.countDocuments({
-            buyerEmail: email,
-            status: "bought",
-          });
-          const reviewCount = await reviewsCollection.countDocuments({
-            userEmail: email,
-          });
+            const recentWishlist = await wishlistCollection
+              .find({ userEmail: email })
+              .sort({ addedAt: -1 })
+              .limit(3)
+              .toArray();
 
-          result.wishlistCount = wishlistCount;
-          result.boughtCount = boughtCount;
-          result.reviewCount = reviewCount;
+            const recentReviews = await reviewsCollection
+              .find({ userEmail: email })
+              .sort({ postedAt: -1 })
+              .limit(2)
+              .toArray();
+
+            const chartData = [
+              { name: "Wishlist", value: wishlistCount },
+              { name: "Bought", value: boughtCount },
+              { name: "Reviews", value: reviewCount },
+            ];
+
+            result.wishlistCount = wishlistCount;
+            result.boughtCount = boughtCount;
+            result.reviewCount = reviewCount;
+            result.recentWishlist = recentWishlist;
+            result.recentReviews = recentReviews;
+            result.chartData = chartData;
+          }
+
+          // 🧑‍💼 Agent Role Dashboard Summary
+          if (role === "agent") {
+            const recentProperties = await propertiesCollection
+              .find({ agentEmail: email })
+              .sort({ timestamp: -1 })
+              .limit(3)
+              .toArray();
+
+            const recentOffers = await offersCollection
+              .find({ agentEmail: email })
+              .sort({ createdAt: -1 })
+              .limit(3)
+              .toArray();
+
+            const totalProperties = await propertiesCollection.countDocuments({
+              agentEmail: email,
+            });
+
+            const soldOffers = await offersCollection
+              .find({ agentEmail: email, status: "bought" })
+              .toArray();
+
+            const soldCount = soldOffers.length;
+
+            const soldAmount = soldOffers.reduce(
+              (sum, offer) => sum + parseFloat(offer.offerAmount || 0),
+              0
+            );
+
+            const requestedCount = await offersCollection.countDocuments({
+              agentEmail: email,
+            });
+
+            const availableCount = totalProperties - soldCount;
+
+            const pieChartData = [
+              { name: "Sold", value: soldCount },
+              { name: "Requested", value: requestedCount },
+              {
+                name: "Available",
+                value: availableCount < 0 ? 0 : availableCount,
+              },
+            ];
+
+            // ✅ Add these to the result object
+            result.addedProperties = totalProperties;
+            result.requestedCount = requestedCount;
+            result.soldCount = soldCount;
+            result.soldAmount = soldAmount;
+
+            result.recentProperties = recentProperties;
+            result.recentOffers = recentOffers;
+            result.pieChartData = pieChartData;
+          }
+
+          // 👨‍💼 Admin Role Dashboard Summary
+          if (role === "admin") {
+            const totalUsers = await usersCollection.countDocuments();
+            const totalProperties = await propertiesCollection.countDocuments();
+            const totalReviews = await reviewsCollection.countDocuments();
+
+            const recentUsers = await usersCollection
+              .find()
+              .sort({ createdAt: -1 })
+              .limit(3)
+              .toArray();
+
+            const recentProperties = await propertiesCollection
+              .find()
+              .sort({ timestamp: -1 })
+              .limit(3)
+              .toArray();
+
+            const recentReviews = await reviewsCollection
+              .find()
+              .sort({ postedAt: -1 })
+              .limit(3)
+              .toArray();
+
+            // (Optional) chart: verified vs pending properties
+            const verifiedCount = await propertiesCollection.countDocuments({
+              verificationStatus: "verified",
+            });
+            const pendingCount = await propertiesCollection.countDocuments({
+              verificationStatus: "pending",
+            });
+
+            const propertyStatusChart = [
+              { name: "Verified", value: verifiedCount },
+              { name: "Pending", value: pendingCount },
+            ];
+
+            result.totalUsers = totalUsers;
+            result.totalProperties = totalProperties;
+            result.totalReviews = totalReviews;
+
+            result.recentUsers = recentUsers;
+            result.recentProperties = recentProperties;
+            result.recentReviews = recentReviews;
+
+            result.propertyStatusChart = propertyStatusChart; // Optional chart
+          }
+
+          res.json(result);
+        } catch (err) {
+          console.error("Dashboard error:", err);
+          res.status(500).json({ message: "Internal server error" });
         }
-
-        if (role === "agent") {
-          const addedProperties = await propertiesCollection.countDocuments({
-            agentEmail: email,
-          });
-          const requestedCount = await offersCollection.countDocuments({
-            agentEmail: email,
-          });
-          const soldProperties = await offersCollection
-            .find({ agentEmail: email, status: "bought" })
-            .toArray();
-          const soldCount = soldProperties.length;
-          const soldAmount = soldProperties.reduce(
-            (sum, offer) => sum + parseFloat(offer.offerAmount),
-            0
-          );
-
-          result.addedProperties = addedProperties;
-          result.requestedCount = requestedCount;
-          result.soldCount = soldCount;
-          result.soldAmount = soldAmount;
-        }
-
-        if (role === "admin") {
-          const totalUsers = await usersCollection.countDocuments();
-          const totalProperties = await propertiesCollection.countDocuments();
-          const totalReviews = await reviewsCollection.countDocuments();
-
-          result.totalUsers = totalUsers;
-          result.totalProperties = totalProperties;
-          result.totalReviews = totalReviews;
-        }
-
-        res.json(result);
-      } catch (err) {
-        console.error("Dashboard error:", err);
-        res.status(500).json({ message: "Internal server error" });
       }
-    });
+    );
 
     // Send a ping to confirm a successful connection
     await client.db("admin").command({ ping: 1 });
