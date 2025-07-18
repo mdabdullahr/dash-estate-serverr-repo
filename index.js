@@ -4,6 +4,7 @@ const cors = require("cors");
 const jwt = require("jsonwebtoken");
 const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
 const stripe = require("stripe")(process.env.STRIPE_SECRET_KEY);
+const admin = require("firebase-admin");
 
 const app = express();
 const port = process.env.PORT || 5000;
@@ -11,6 +12,12 @@ const port = process.env.PORT || 5000;
 // Middleware
 app.use(cors());
 app.use(express.json());
+
+const serviceAccount = require("./real-estate-admin-service-key.json");
+
+admin.initializeApp({
+  credential: admin.credential.cert(serviceAccount),
+});
 
 const uri = `mongodb+srv://${process.env.DB_USER}:${process.env.DB_PASS}@cluster0.jsryxpo.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0`;
 
@@ -396,7 +403,10 @@ async function run() {
     //* ADMIN RELATED API
     // GET all properties for admin
     app.get("/admin/properties", verifyJWT, verifyAdmin, async (req, res) => {
-      const result = await propertiesCollection.find().toArray();
+      const result = await propertiesCollection
+        .find()
+        .sort({ timestamp: -1 })
+        .toArray();
       res.send(result);
     });
 
@@ -433,6 +443,7 @@ async function run() {
       async (req, res) => {
         const properties = await propertiesCollection
           .find({ verificationStatus: "verified" })
+          .sort({ timestamp: -1 })
           .toArray();
         res.send(properties);
       }
@@ -498,28 +509,27 @@ async function run() {
     });
 
     // Delete user from database and also firebase
-    // admin.initializeApp({ credential: admin.credential.cert(serviceAccount) })
-
     app.delete("/users/:id", verifyJWT, verifyAdmin, async (req, res) => {
       const id = req.params.id;
       const user = await usersCollection.findOne({ _id: new ObjectId(id) });
 
       if (!user) return res.status(404).send("User not found");
 
-      // 1. Delete from MongoDB
-      const result = await usersCollection.deleteOne({ _id: new ObjectId(id) });
-      res.send(result);
+      try {
+        await admin.auth().deleteUser(user.firebaseUid);
 
-      // 2. Delete from Firebase Auth
-      // try {
-      //   const userRecord = await admin.auth().getUserByEmail(user.email);
-      //   await admin.auth().deleteUser(userRecord.uid);
-      //   res.send({ message: "User deleted from DB and Firebase" });
-      // } catch (error) {
-      //   res.send({
-      //     message: "User deleted from DB, but not found in Firebase",
-      //   });
-      // }
+        const result = await usersCollection.deleteOne({
+          _id: new ObjectId(id),
+        });
+
+        res.send({
+          message: "User deleted from both Firebase and MongoDB",
+          result,
+        });
+      } catch (error) {
+        console.error("Error deleting user:", error);
+        res.status(500).send({ message: "Failed to delete user", error });
+      }
     });
 
     // PATCH verify
